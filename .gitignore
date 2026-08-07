@@ -29,3 +29,6 @@ coverage/
 
 logs/
 *.log
+
+# Local clone created from the ModelScope push instructions.
+BidPilot_AI/
