@@ -155,8 +155,8 @@ BidPilot 的置信度不是单纯沿用模型返回值，而是拆分为多个�
 ### 方式一：一键启动
 
 ```bash
-git clone https://github.com/guangshu100/BidMaster-Pro.git
-cd BidMaster-Pro
+git clone https://github.com/Router0824/BidPilot-AI.git
+cd BidPilot-AI
 ./start.sh
 ```
 
