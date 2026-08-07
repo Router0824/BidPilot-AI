@@ -1,0 +1,33 @@
+replicaCount: 1
+
+image:
+  backend: bidpilot-backend:latest
+  frontend: bidpilot-frontend:latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  backendPort: 8000
+  frontendPort: 80
+
+env:
+  BIDPILOT_DATABASE_URL: postgresql+asyncpg://bidpilot:bidpilot@postgres:5432/bidpilot
+  BIDPILOT_REDIS_URL: redis://redis:6379/0
+  BIDPILOT_LLM_PROVIDER: deepseek
+  BIDPILOT_LLM_BASE_URL: https://api.deepseek.com
+  BIDPILOT_LLM_FAST_MODEL: deepseek-v4-flash
+  BIDPILOT_LLM_QUALITY_MODEL: deepseek-v4-pro
+  BIDPILOT_LDAP_ENABLED: "false"
+  BIDPILOT_LDAP_SERVER_URL: ""
+  BIDPILOT_LDAP_BASE_DN: ""
+  BIDPILOT_SSO_ENABLED: "false"
+  BIDPILOT_SSO_PROVIDER: ""
+  BIDPILOT_SSO_METADATA_URL: ""
+
+secrets:
+  BIDPILOT_SECRET_KEY: change-me
+  BIDPILOT_LLM_API_KEY: ""
+
+ingress:
+  enabled: false
+  host: bidpilot.example.com

@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - BIDPILOT_DATABASE_URL=sqlite+aiosqlite:///./bidpilot.db
+      - BIDPILOT_DEBUG=false
+    volumes:
+      - bidpilot_data:/app/uploads
+      - bidpilot_db:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/live')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  bidpilot_data:
+  bidpilot_db:
