@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bidpilot-backend
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: bidpilot-backend
+  template:
+    metadata:
+      labels:
+        app: bidpilot-backend
+    spec:
+      containers:
+        - name: backend
+          image: {{ .Values.image.backend }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: bidpilot-config
+            - secretRef:
+                name: bidpilot-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bidpilot-backend
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: bidpilot-backend
+  ports:
+    - port: {{ .Values.service.backendPort }}
+      targetPort: 8000
