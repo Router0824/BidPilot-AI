@@ -16,6 +16,7 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+bidpilot_runtime_config.json
 uploads/
 
 frontend/node_modules/

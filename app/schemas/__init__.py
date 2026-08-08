@@ -27,6 +27,18 @@ class UserInfo(BaseModel):
     display_name: str
 
 
+class LLMConfigUpdate(BaseModel):
+    provider: Literal["mock", "openai", "deepseek", "custom"] = "mock"
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    fast_model: Optional[str] = None
+    quality_model: Optional[str] = None
+    timeout_seconds: int = Field(default=60, ge=5, le=300)
+    cost_limit_per_project: float = Field(default=0.0, ge=0)
+    estimated_cost_per_1k_tokens: float = Field(default=0.0, ge=0)
+
+
 # ── Project ──
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

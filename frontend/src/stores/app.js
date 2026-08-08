@@ -23,6 +23,18 @@ export const useAppStore = defineStore('app', {
       this.user = null
       localStorage.removeItem('token')
     },
+    async fetchLLMConfig() {
+      const { data } = await api.get('/system/llm-config')
+      return data.data
+    },
+    async saveLLMConfig(payload) {
+      const { data } = await api.put('/system/llm-config', payload)
+      return data.data
+    },
+    async testLLMConfig() {
+      const { data } = await api.post('/system/llm-config/test')
+      return data.data
+    },
     async fetchProjects(filters = {}) {
       const params = new URLSearchParams()
       if (filters.status) params.set('status', filters.status)

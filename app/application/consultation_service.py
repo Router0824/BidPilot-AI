@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents import MockLLMGateway, active_llm_gateway
+from app import agents
+from app.agents import MockLLMGateway
 from app.application.knowledge_service import KnowledgeIndexService, tokenize
 from app.domain.models import (
     ConsultationMessage,
@@ -235,7 +236,8 @@ class ConsultationService:
     ) -> dict:
         role = user.get("role") or "writer"
         base_confidence = self._context_confidence(citations)
-        if active_llm_gateway and not isinstance(active_llm_gateway, MockLLMGateway):
+        llm_gateway = agents.active_llm_gateway
+        if llm_gateway and not isinstance(llm_gateway, MockLLMGateway):
             messages = [
                 {
                     "role": "system",
@@ -258,7 +260,7 @@ class ConsultationService:
                 },
             ]
             try:
-                data = await active_llm_gateway.call("consultation_answer", messages, "json", max_tokens=2200, temperature=0.2)
+                data = await llm_gateway.call("consultation_answer", messages, "json", max_tokens=2200, temperature=0.2)
                 answer = str(data.get("answer") or "").strip()
                 if answer:
                     confidence = min(float(data.get("confidence") or base_confidence), base_confidence + 0.12)

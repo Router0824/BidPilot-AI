@@ -11,6 +11,7 @@
       <nav>
         <div class="nav-label">工作区</div>
         <router-link to="/" class="nav-item">项目工作台</router-link>
+        <router-link to="/settings" class="nav-item">模型设置</router-link>
         <router-link to="/information" class="nav-item">资讯中心</router-link>
         <template v-if="currentProject">
           <div class="nav-label">当前项目</div>

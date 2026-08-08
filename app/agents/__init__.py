@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.runtime_config import get_runtime_llm_config
 from app.observability.progress import publish_current
 
 
@@ -897,8 +898,9 @@ class ReviewAgent(BaseAgent):
 
 
 def build_llm_gateway():
-    provider = (settings.LLM_PROVIDER or "mock").lower()
-    if provider in ("mock", "none", "disabled") or not settings.LLM_API_KEY:
+    runtime = get_runtime_llm_config()
+    provider = (runtime.provider or "mock").lower()
+    if provider in ("mock", "none", "disabled") or not runtime.api_key:
         return MockLLMGateway()
     default_base_urls = {
         "openai": "https://api.openai.com/v1",
@@ -908,8 +910,8 @@ def build_llm_gateway():
         "openai": "gpt-4o-mini",
         "deepseek": "deepseek-v4-flash",
     }
-    fast_model = settings.LLM_FAST_MODEL or default_models.get(provider, "gpt-4o-mini")
-    quality_model = settings.LLM_QUALITY_MODEL or ("deepseek-v4-pro" if provider == "deepseek" else "gpt-4o")
+    fast_model = runtime.fast_model or default_models.get(provider, "gpt-4o-mini")
+    quality_model = runtime.quality_model or ("deepseek-v4-pro" if provider == "deepseek" else "gpt-4o")
     model_routing = {
         "extract_project_facts": fast_model,
         "extract_requirements": fast_model,
@@ -924,12 +926,12 @@ def build_llm_gateway():
         **(settings.LLM_MODEL_ROUTING or {}),
     }
     return LLMGateway(
-        api_key=settings.LLM_API_KEY,
-        base_url=settings.LLM_BASE_URL or default_base_urls.get(provider, "https://api.openai.com/v1"),
-        model=settings.LLM_MODEL or default_models.get(provider, "gpt-4o-mini"),
-        timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
-        cost_limit_per_project=settings.LLM_COST_LIMIT_PER_PROJECT,
-        estimated_cost_per_1k_tokens=settings.LLM_ESTIMATED_COST_PER_1K_TOKENS,
+        api_key=runtime.api_key,
+        base_url=runtime.base_url or default_base_urls.get(provider, "https://api.openai.com/v1"),
+        model=runtime.model or default_models.get(provider, "gpt-4o-mini"),
+        timeout_seconds=runtime.timeout_seconds or settings.LLM_TIMEOUT_SECONDS,
+        cost_limit_per_project=runtime.cost_limit_per_project or 0.0,
+        estimated_cost_per_1k_tokens=runtime.estimated_cost_per_1k_tokens or 0.0,
         model_routing=model_routing,
     )
 
@@ -941,3 +943,37 @@ scoring_agent = ScoringAgent(active_llm_gateway)
 retrieval_agent = RetrievalAgent(active_llm_gateway)
 drafting_agent = DraftingAgent(active_llm_gateway)
 review_agent = ReviewAgent(active_llm_gateway)
+
+
+def reload_llm_gateway():
+    global active_llm_gateway
+    active_llm_gateway = build_llm_gateway()
+    for agent in (
+        document_agent,
+        requirement_agent,
+        scoring_agent,
+        retrieval_agent,
+        drafting_agent,
+        review_agent,
+    ):
+        agent.llm = active_llm_gateway
+    try:
+        from app.agents.planner_agent import planner_agent
+
+        planner_agent.llm = active_llm_gateway
+    except Exception:
+        pass
+    try:
+        from app.agents.specialized_agents import commercial_agent, qualification_agent
+
+        commercial_agent.llm = active_llm_gateway
+        qualification_agent.llm = active_llm_gateway
+    except Exception:
+        pass
+    try:
+        from app.workflows import workflow_service
+
+        workflow_service.active_llm_gateway = active_llm_gateway
+    except Exception:
+        pass
+    return active_llm_gateway

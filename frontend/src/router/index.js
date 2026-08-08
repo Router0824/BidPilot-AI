@@ -8,6 +8,7 @@ const routes = [
     component: () => import('../pages/MainLayout.vue'),
     children: [
       { path: '', name: 'Dashboard', component: () => import('../pages/DashboardPage.vue') },
+      { path: 'settings', name: 'Settings', component: () => import('../pages/SettingsPage.vue') },
       { path: 'information', name: 'Information', component: () => import('../pages/InformationPage.vue') },
       { path: 'project/:id', name: 'ProjectDetail', component: () => import('../pages/ProjectDetailPage.vue') },
       { path: 'project/:id/facts', name: 'FactsConfirm', component: () => import('../pages/FactsConfirmPage.vue') },
