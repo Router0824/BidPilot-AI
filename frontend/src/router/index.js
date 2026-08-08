@@ -38,7 +38,7 @@ router.beforeEach(async to => {
   if (sessionChecked) return true
 
   try {
-    await api.get('/auth/me')
+    await api.get('/auth/me', { meta: { silent: true } })
     sessionChecked = true
     return true
   } catch {

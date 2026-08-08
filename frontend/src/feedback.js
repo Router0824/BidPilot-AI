@@ -30,6 +30,8 @@ function friendlyUrl(url = '') {
 
 function isSilentRequest(config) {
   if (config.meta?.silent) return true
+  const url = String(config.url || '')
+  if (url.includes('/auth/login') || url.includes('/auth/me')) return true
   const method = (config.method || 'get').toLowerCase()
   return method === 'get'
 }
@@ -53,10 +55,7 @@ export function beginRequest(config) {
 export function finishRequest(id, ok = true, detail = '') {
   const index = feedbackState.pending.findIndex(item => item.id === id)
   const item = index >= 0 ? feedbackState.pending.splice(index, 1)[0] : null
-  if (!item) {
-    if (!ok) pushMessage('error', '请求失败', detail)
-    return
-  }
+  if (!item) return
   pushMessage(ok ? 'success' : 'error', ok ? `${item.label}完成` : `${item.label}失败`, ok ? '' : detail)
 }
 
