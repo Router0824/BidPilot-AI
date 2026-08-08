@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import MOCK_USERS, verify_password, create_access_token
+from app.core.auth import MOCK_USERS, verify_password, create_access_token, require_auth_detail
 from app.schemas import LoginRequest, APIResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -21,4 +21,14 @@ async def login(data: LoginRequest):
             "role": user["role"],
             "display_name": user["display_name"],
         },
+    })
+
+
+@router.get("/me")
+async def me(user: dict = Depends(require_auth_detail)):
+    return APIResponse(data={
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "display_name": user["display_name"],
     })

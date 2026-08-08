@@ -9,6 +9,9 @@ export const useAppStore = defineStore('app', {
   }),
   actions: {
     async login(username, password) {
+      this.token = ''
+      this.user = null
+      localStorage.removeItem('token')
       const { data } = await api.post('/auth/login', { username, password })
       this.token = data.data.access_token
       this.user = data.data.user

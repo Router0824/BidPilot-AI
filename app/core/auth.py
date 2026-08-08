@@ -70,6 +70,20 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     return None
 
 
+async def require_auth_detail(token: str = Depends(oauth2_scheme)):
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌无效或已过期")
+    username = payload.get("sub")
+    user = MOCK_USERS.get(username or "")
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌用户不存在")
+    return user
+
+
 async def require_auth(user=Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录或令牌已过期")

@@ -8,7 +8,8 @@ const api = axios.create({
 
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  const isLoginRequest = String(config.url || '').includes('/auth/login')
+  if (token && !isLoginRequest) config.headers.Authorization = `Bearer ${token}`
   config.meta = config.meta || {}
   config.meta.requestId = beginRequest(config)
   return config
@@ -21,7 +22,8 @@ api.interceptors.response.use(
   },
   err => {
     finishRequest(err.config?.meta?.requestId, false, err.response?.data?.detail || err.message)
-    if (err.response?.status === 401) {
+    const isLoginRequest = String(err.config?.url || '').includes('/auth/login')
+    if (err.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('token')
       window.location.href = '/login'
     }
