@@ -1,12 +1,20 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from app.core.config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+
+async def resolve_access_token(
+    bearer_token: str = Depends(oauth2_scheme),
+    x_bidpilot_token: str | None = Header(default=None, alias="X-BidPilot-Token"),
+    token_query: str | None = Query(default=None, alias="token"),
+):
+    return bearer_token or x_bidpilot_token or token_query
 
 
 def _hash_password(password: str) -> str:
@@ -57,7 +65,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(token: str = Depends(resolve_access_token)):
     if not token:
         return None
     try:
@@ -70,7 +78,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     return None
 
 
-async def require_auth_detail(token: str = Depends(oauth2_scheme)):
+async def require_auth_detail(token: str = Depends(resolve_access_token)):
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
     try:

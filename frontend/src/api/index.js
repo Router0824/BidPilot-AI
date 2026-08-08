@@ -9,7 +9,10 @@ const api = axios.create({
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('token')
   const isLoginRequest = String(config.url || '').includes('/auth/login')
-  if (token && !isLoginRequest) config.headers.Authorization = `Bearer ${token}`
+  if (token && !isLoginRequest) {
+    config.headers.Authorization = `Bearer ${token}`
+    config.headers['X-BidPilot-Token'] = token
+  }
   config.meta = config.meta || {}
   config.meta.requestId = beginRequest(config)
   return config
