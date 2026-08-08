@@ -1,3 +1,16 @@
+---
+domain:
+  - nlp
+tags:
+  - agent
+  - fastapi
+  - vue
+  - bid-document
+deployspec:
+  entry_file: app.py
+license: Apache License 2.0
+---
+
 # BidPilot-AI
 
 BidPilot-AI is a FastAPI + Vue 3 platform for AI-assisted bid document preparation. The current build supports document upload and parsing, requirement and fact extraction, addendum conflict detection, outline and draft generation, review, export, enterprise knowledge retrieval, SSE workflow progress, and a local Mock LLM mode for demos without API keys.
