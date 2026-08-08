@@ -28,7 +28,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 
@@ -38,6 +38,10 @@ const username = ref('admin')
 const password = ref('admin123')
 const loading = ref(false)
 const error = ref('')
+
+onMounted(() => {
+  store.logout()
+})
 
 async function handleLogin() {
   loading.value = true

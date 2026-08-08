@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import api from '../api'
 
 const routes = [
   { path: '/login', name: 'Login', component: () => import('../pages/LoginPage.vue') },
@@ -25,6 +26,26 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+let sessionChecked = false
+
+router.beforeEach(async to => {
+  if (to.path === '/login') return true
+
+  const token = localStorage.getItem('token')
+  if (!token) return '/login'
+  if (sessionChecked) return true
+
+  try {
+    await api.get('/auth/me')
+    sessionChecked = true
+    return true
+  } catch {
+    localStorage.removeItem('token')
+    sessionChecked = false
+    return '/login'
+  }
 })
 
 export default router
