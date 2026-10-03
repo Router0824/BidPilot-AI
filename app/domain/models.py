@@ -135,6 +135,7 @@ class Project(Base):
     outline_sections = relationship("OutlineSection", back_populates="project", cascade="all, delete-orphan")
     workflow_runs = relationship("WorkflowRun", back_populates="project", cascade="all, delete-orphan")
     confirmation_tasks = relationship("ConfirmationTask", back_populates="project", cascade="all, delete-orphan")
+    export_profile = relationship("ExportProfile", cascade="all, delete-orphan", uselist=False)
 
 
 class Document(Base):
@@ -293,6 +294,7 @@ class OutlineSection(Base):
 
     project = relationship("Project", back_populates="outline_sections")
     draft_versions = relationship("DraftVersion", back_populates="section", cascade="all, delete-orphan")
+    protection = relationship("SectionProtection", cascade="all, delete-orphan", uselist=False)
 
 
 class DraftVersion(Base):
@@ -310,6 +312,32 @@ class DraftVersion(Base):
     created_at = Column(DateTime, default=utcnow)
 
     section = relationship("OutlineSection", back_populates="draft_versions")
+
+
+class SectionProtection(Base):
+    __tablename__ = "section_protections"
+
+    section_id = Column(String, ForeignKey("outline_sections.id"), primary_key=True)
+    protected = Column(Boolean, nullable=False, default=True)
+    updated_by = Column(String)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class MaterialMetadata(Base):
+    __tablename__ = "material_metadata"
+
+    chunk_id = Column(String, ForeignKey("knowledge_chunks.id"), primary_key=True)
+    source_reference = Column(Text)
+    applicable_scope = Column(Text)
+
+
+class ExportProfile(Base):
+    __tablename__ = "export_profiles"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    company_name = Column(String(255), default="")
+    template_path = Column(Text)
+    template_name = Column(String(255))
 
 
 class ProjectMember(Base):
@@ -538,6 +566,7 @@ class KnowledgeChunk(Base):
     embedding = Column(JSON)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    material_metadata = relationship("MaterialMetadata", cascade="all, delete-orphan", uselist=False)
 
 
 class ExportJob(Base):

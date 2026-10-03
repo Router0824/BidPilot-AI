@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Literal
 from datetime import datetime
 import uuid
@@ -37,6 +37,20 @@ class LLMConfigUpdate(BaseModel):
     timeout_seconds: int = Field(default=60, ge=5, le=300)
     cost_limit_per_project: float = Field(default=0.0, ge=0)
     estimated_cost_per_1k_tokens: float = Field(default=0.0, ge=0)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value):
+        from urllib.parse import urlsplit
+        if not value:
+            return value
+        value = value.strip().rstrip("/")
+        parsed = urlsplit(value)
+        if parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("Base URL 必须是无凭据、无查询参数的 HTTP(S) 地址")
+        if value.endswith("/chat/completions"):
+            value = value[:-len("/chat/completions")]
+        return value
 
 
 # ── Project ──

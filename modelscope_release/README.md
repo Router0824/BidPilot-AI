@@ -1,6 +1,6 @@
 # BidPilot-AI ModelScope Release Pack
 
-This folder is a standalone deployment pack for publishing BidPilot-AI to ModelScope Community or any Docker-based demo platform.
+This folder contains deployment support files for publishing BidPilot-AI to ModelScope Community or any Docker-based demo platform. Build from the repository root; this folder alone does not include the application source.
 
 It keeps secrets out of the repository. Do not commit API keys. Configure real model access through environment variables on the platform.
 
@@ -67,8 +67,8 @@ For DeepSeek-compatible mode:
 BIDPILOT_LLM_PROVIDER=deepseek
 BIDPILOT_LLM_API_KEY=<set-in-platform-secret>
 BIDPILOT_LLM_BASE_URL=https://api.deepseek.com
-BIDPILOT_LLM_MODEL=deepseek-v4-flash
-BIDPILOT_LLM_FAST_MODEL=deepseek-v4-flash
+BIDPILOT_LLM_MODEL=deepseek-flash
+BIDPILOT_LLM_FAST_MODEL=deepseek-flash
 BIDPILOT_LLM_QUALITY_MODEL=deepseek-v4-pro
 ```
 
@@ -94,10 +94,9 @@ GET /health/ready
 ## Recommended ModelScope Settings
 
 - Port: `7860`
-- Start command: `/release/start.sh`
+- Start command: `/app/modelscope_release/start.sh` (already set in the Dockerfile)
 - Secret variables:
   - `BIDPILOT_SECRET_KEY`
   - `BIDPILOT_LLM_API_KEY` if using a real model
 - Public demo variables:
   - `BIDPILOT_LLM_PROVIDER=mock`
-

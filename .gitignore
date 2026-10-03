@@ -16,13 +16,20 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
 bidpilot_runtime_config.json
 uploads/
+data/
+.vscode/
+.idea/
 
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.DS_Store
+frontend/test-results/
+frontend/playwright-report/
 
 node_modules/
 dist/
@@ -31,5 +38,5 @@ coverage/
 logs/
 *.log
 
-# Local clone created from the ModelScope push instructions.
+# Local deployment checkout.
 BidPilot_AI/

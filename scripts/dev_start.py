@@ -29,7 +29,7 @@ def build_backend_env() -> dict:
     if use_real_api:
         env["BIDPILOT_LLM_PROVIDER"] = "deepseek"
         env.setdefault("BIDPILOT_LLM_BASE_URL", "https://api.deepseek.com")
-        env.setdefault("BIDPILOT_LLM_FAST_MODEL", "deepseek-v4-flash")
+        env.setdefault("BIDPILOT_LLM_FAST_MODEL", "deepseek-flash")
         env.setdefault("BIDPILOT_LLM_QUALITY_MODEL", "deepseek-v4-pro")
         if not env.get("BIDPILOT_LLM_API_KEY"):
             key = getpass.getpass("請輸入 DeepSeek API Key（不會保存）: ").strip()

@@ -6,9 +6,9 @@
         <h1>模型设置</h1>
         <p>给部署后的使用者输入自己的 API Key；不填写时保持 Mock 模式，仍可完整演示。</p>
       </div>
-      <div :class="['mode-pill', form.provider === 'mock' ? 'mock' : 'real']">
+      <div :class="['mode-pill', !config || config.provider === 'mock' ? 'mock' : 'real']">
         <span></span>
-        {{ form.provider === 'mock' ? 'Mock 演示模式' : '真实模型模式' }}
+        {{ !config || config.provider === 'mock' ? '当前运行：Mock' : '当前运行：真实模型' }}
       </div>
     </header>
 
@@ -35,7 +35,7 @@
       <form class="config-panel" @submit.prevent="save">
         <div class="panel-title">
           <h2>API 连接</h2>
-          <small>{{ config?.api_key_configured ? '已保存 Key，留空不会覆盖' : '尚未保存 Key' }}</small>
+          <small>{{ config?.api_key_configured ? '已保存 Key，仅同一服务可留空复用' : '尚未保存 Key' }}</small>
         </div>
 
         <label>
@@ -57,7 +57,7 @@
         <div class="two-col">
           <label>
             <span>默认模型</span>
-            <input v-model="form.model" :disabled="form.provider === 'mock'" placeholder="deepseek-v4-flash" />
+            <input v-model="form.model" :disabled="form.provider === 'mock'" placeholder="deepseek-flash" />
           </label>
           <label>
             <span>高质量模型</span>
@@ -68,7 +68,7 @@
         <div class="two-col">
           <label>
             <span>快速模型</span>
-            <input v-model="form.fast_model" :disabled="form.provider === 'mock'" placeholder="deepseek-v4-flash" />
+            <input v-model="form.fast_model" :disabled="form.provider === 'mock'" placeholder="deepseek-flash" />
           </label>
           <label>
             <span>超时秒数</span>
@@ -78,7 +78,7 @@
 
         <div class="two-col">
           <label>
-            <span>项目成本上限</span>
+            <span>本进程估算成本上限</span>
             <input v-model.number="form.cost_limit_per_project" type="number" min="0" step="0.01" />
           </label>
           <label>
@@ -102,8 +102,8 @@
         <ol>
           <li>选择 Mock 可直接跑 Demo，不需要任何密钥。</li>
           <li>选择 DeepSeek/OpenAI/Custom 后输入 API Key。</li>
-          <li>确认 Base URL 和模型名，点击“保存并启用”。</li>
-          <li>点击“测试连接”，成功后再运行 Agent 工作流。</li>
+          <li>确认 Base URL 和模型名，点击“测试连接”验证当前填写的配置。</li>
+          <li>测试成功后点击“保存并启用”，再运行 Agent 工作流。</li>
         </ol>
         <div class="notice">
           <b>安全提示</b>
@@ -133,8 +133,8 @@ const defaults = {
   mock: { base_url: '', model: '', fast_model: '', quality_model: '' },
   deepseek: {
     base_url: 'https://api.deepseek.com',
-    model: 'deepseek-v4-flash',
-    fast_model: 'deepseek-v4-flash',
+    model: 'deepseek-flash',
+    fast_model: 'deepseek-flash',
     quality_model: 'deepseek-v4-pro',
   },
   openai: {
@@ -176,7 +176,7 @@ function applyConfig(data) {
 function selectProvider(provider) {
   form.provider = provider
   Object.assign(form, defaults[provider])
-  if (provider === 'mock') form.api_key = ''
+  form.api_key = ''
   message.value = ''
 }
 
@@ -210,7 +210,7 @@ async function test() {
   testing.value = true
   message.value = ''
   try {
-    const data = await store.testLLMConfig()
+    const data = await store.testLLMConfig({ ...form })
     messageType.value = 'success'
     message.value = data.message || '连接成功'
   } catch (e) {

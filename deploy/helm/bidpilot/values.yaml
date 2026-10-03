@@ -15,7 +15,7 @@ env:
   BIDPILOT_REDIS_URL: redis://redis:6379/0
   BIDPILOT_LLM_PROVIDER: deepseek
   BIDPILOT_LLM_BASE_URL: https://api.deepseek.com
-  BIDPILOT_LLM_FAST_MODEL: deepseek-v4-flash
+  BIDPILOT_LLM_FAST_MODEL: deepseek-flash
   BIDPILOT_LLM_QUALITY_MODEL: deepseek-v4-pro
   BIDPILOT_LDAP_ENABLED: "false"
   BIDPILOT_LDAP_SERVER_URL: ""

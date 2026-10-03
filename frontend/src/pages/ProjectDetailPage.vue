@@ -17,6 +17,8 @@
       <div class="info-card risk"><span class="label">高风险</span><span class="value">{{ project?.high_risk_count }}</span></div>
     </div>
 
+    <ProjectWorkbench ref="workbenchRef" :project-id="projectId" />
+    <details class="demo-entry"><summary>90 秒演示</summary>
     <section class="demo-launch">
       <div class="demo-launch-copy">
         <span class="eyebrow">DEMO MODE</span>
@@ -47,6 +49,7 @@
         </span>
       </div>
     </section>
+    </details>
 
     <div class="section">
       <div class="section-header">
@@ -134,7 +137,7 @@
       <router-link :to="`/project/${projectId}/facts`" class="action-card">事实确认</router-link>
       <router-link :to="`/project/${projectId}/requirements`" class="action-card">要求矩阵</router-link>
       <router-link :to="`/project/${projectId}/evidence`" class="action-card">响应证据图谱</router-link>
-      <router-link :to="`/project/${projectId}/outline`" class="action-card">技术标大纲</router-link>
+      <router-link :to="`/project/${projectId}/outline`" class="action-card">章节编写</router-link>
       <router-link :to="`/project/${projectId}/reviews`" class="action-card">审查中心</router-link>
       <router-link :to="`/project/${projectId}/workflow`" class="action-card">Agent 任务</router-link>
       <router-link :to="`/project/${projectId}/consultation`" class="action-card">咨询中心</router-link>
@@ -144,10 +147,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { pushMessage } from '../feedback'
+import ProjectWorkbench from '../components/ProjectWorkbench.vue'
+const workbenchRef = ref(null)
 
 const route = useRoute()
 const router = useRouter()
@@ -156,6 +161,7 @@ const projectId = route.params.id
 const project = ref(null)
 const documents = ref([])
 const wf = ref(null)
+watch([documents, wf], () => workbenchRef.value?.load())
 const uploadType = ref('tender_main')
 const uploading = ref(false)
 const addendumConflicts = ref([])

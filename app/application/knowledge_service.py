@@ -3,7 +3,8 @@ import math
 import re
 from collections import Counter
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -106,7 +107,8 @@ class KnowledgeIndexService:
     async def retrieve(self, query_text: str, limit: int = 8, audited_only: bool = True) -> list[dict]:
         query_vector = embed_text(query_text)
         query_terms = Counter(tokenize(query_text))
-        stmt = select(KnowledgeChunk).where(KnowledgeChunk.is_expired == False)
+        stmt = select(KnowledgeChunk).where(KnowledgeChunk.is_expired == False,
+            or_(KnowledgeChunk.valid_until.is_(None), KnowledgeChunk.valid_until > datetime.now(timezone.utc).replace(tzinfo=None)))
         if audited_only:
             stmt = stmt.where(KnowledgeChunk.is_audited == True)
         result = await self.db.execute(stmt)

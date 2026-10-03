@@ -31,8 +31,8 @@ export const useAppStore = defineStore('app', {
       const { data } = await api.put('/system/llm-config', payload)
       return data.data
     },
-    async testLLMConfig() {
-      const { data } = await api.post('/system/llm-config/test')
+    async testLLMConfig(payload) {
+      const { data } = await api.post('/system/llm-config/test', payload)
       return data.data
     },
     async fetchProjects(filters = {}) {

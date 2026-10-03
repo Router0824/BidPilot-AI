@@ -7,6 +7,7 @@ import httpx
 from app.core.config import settings
 from app.core.runtime_config import get_runtime_llm_config
 from app.observability.progress import publish_current
+from app.core.llm_errors import LLMResponseError, llm_error_message
 
 
 REQUIREMENT_TYPES = {"qualification", "technical", "commercial", "scoring", "delivery", "format"}
@@ -81,6 +82,7 @@ class LLMGateway:
         cost_limit_per_project: float = 0.0,
         estimated_cost_per_1k_tokens: float = 0.0,
         model_routing: dict[str, str] | None = None,
+        provider: str = "openai",
     ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -89,6 +91,7 @@ class LLMGateway:
         self.cost_limit_per_project = cost_limit_per_project
         self.estimated_cost_per_1k_tokens = estimated_cost_per_1k_tokens
         self.model_routing = model_routing or {}
+        self.provider = provider
         self.total_tokens = 0
         self.estimated_cost = 0.0
 
@@ -100,9 +103,6 @@ class LLMGateway:
         max_tokens: int = 2000,
         temperature: float = 0.1,
     ) -> dict:
-        if self.cost_limit_per_project and self.estimated_cost >= self.cost_limit_per_project:
-            raise RuntimeError("LLM cost limit exceeded for this process")
-
         selected_model = self.model_routing.get(task_type, self.model)
         await publish_current(
             "llm.request",
@@ -118,70 +118,58 @@ class LLMGateway:
         }
         if response_schema:
             payload["response_format"] = {"type": "json_object"}
+        if self.provider == "deepseek" and task_type == "connection_test":
+            # A connectivity probe needs only final JSON, not a reasoning budget.
+            payload["thinking"] = {"type": "disabled"}
 
+        usage = {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        attempts = 0
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-                content = data["choices"][0]["message"].get("content") or ""
-                if not content.strip() and max_tokens < 512:
-                    retry_payload = {**payload, "max_tokens": 512}
+                while True:
+                    if self.cost_limit_per_project and self.estimated_cost >= self.cost_limit_per_project:
+                        raise LLMResponseError("已达到当前进程的模型成本上限，请检查预算")
+                    attempts += 1
                     response = await client.post(
                         f"{self.base_url}/chat/completions",
                         headers={
                             "Authorization": f"Bearer {self.api_key}",
                             "Content-Type": "application/json",
                         },
-                        json=retry_payload,
+                        json=payload,
                     )
                     response.raise_for_status()
                     data = response.json()
+                    billed = data.get("usage") or {}
+                    for key in usage:
+                        usage[key] += int(billed.get(key) or 0)
+                    tokens = int(billed.get("total_tokens") or 0)
+                    self.total_tokens += tokens
+                    self.estimated_cost += tokens / 1000 * self.estimated_cost_per_1k_tokens
+                    try:
+                        choice = data["choices"][0]
+                        content = choice["message"].get("content")
+                        if not isinstance(content, str) or not content.strip():
+                            raise ValueError("empty content")
+                        if choice.get("finish_reason") == "length":
+                            raise ValueError("truncated output")
+                        parsed = _extract_json_object(content)
+                        if not isinstance(parsed, dict) or not parsed:
+                            raise ValueError("expected a nonempty object")
+                        break
+                    except (KeyError, IndexError, TypeError, ValueError):
+                        if attempts >= 3 or payload["max_tokens"] >= 1024:
+                            raise LLMResponseError("模型未返回完整的 JSON 对象，可能为空、截断或格式不兼容") from None
+                        payload["max_tokens"] = min(1024, max(512, payload["max_tokens"] * 2))
         except Exception as exc:
-            await publish_current("llm.error", "模型调用失败", str(exc), {"task_type": task_type})
+            await publish_current("llm.error", "模型调用失败", llm_error_message(exc), {"task_type": task_type})
             raise
-
-        usage = data.get("usage") or {}
-        total_tokens = int(usage.get("total_tokens") or 0)
-        self.total_tokens += total_tokens
-        if self.estimated_cost_per_1k_tokens:
-            self.estimated_cost += total_tokens / 1000 * self.estimated_cost_per_1k_tokens
-
-        content = data["choices"][0]["message"].get("content") or "{}"
-        try:
-            parsed = _extract_json_object(content)
-        except json.JSONDecodeError:
-            if max_tokens >= 1024:
-                raise
-            retry_payload = {**payload, "max_tokens": 1024}
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=retry_payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-            usage = data.get("usage") or {}
-            total_tokens = int(usage.get("total_tokens") or 0)
-            self.total_tokens += total_tokens
-            content = data["choices"][0]["message"].get("content") or "{}"
-            parsed = _extract_json_object(content)
         parsed["_llm"] = {
             "task_type": task_type,
-            "model": self.model,
+            "model": data.get("model") or selected_model,
             "selected_model": selected_model,
             "usage": usage,
+            "attempts": attempts,
             "estimated_cost": round(self.estimated_cost, 6),
         }
         await publish_current(
@@ -619,6 +607,11 @@ class DraftingAgent(BaseAgent):
         from app.domain.models import OutlineSection, Project, Requirement
         from sqlalchemy import select
 
+        existing = (await db_session.execute(select(OutlineSection.id).where(
+            OutlineSection.project_id == project_id))).scalars().all()
+        if existing:
+            return {"outline_sections": len(existing), "preserved": True}
+
         req_result = await db_session.execute(
             select(Requirement).where(Requirement.project_id == project_id)
         )
@@ -713,6 +706,13 @@ class DraftingAgent(BaseAgent):
         if not section:
             return {"error": "No section found to generate"}
 
+        from app.domain.models import SectionProtection
+        from app.application.editing_service import write_version
+        protection = await db_session.get(SectionProtection, section.id)
+        if protection and protection.protected:
+            return {"section_id": section.id, "skipped": True, "reason": "人工编辑保护"}
+        expected_version_id = section.current_version_id
+
         facts_result = await db_session.execute(
             select(ProjectFact).where(ProjectFact.project_id == project_id)
         )
@@ -744,19 +744,9 @@ class DraftingAgent(BaseAgent):
         content = await self._generate_section_content(section.title, facts, chunks, requirements)
         citations = self._build_citations(chunks)
 
-        draft = DraftVersion(
-            section_id=section.id,
-            content=content,
-            citations=citations,
-            generated_by="drafting_agent",
-            model_name=getattr(self.llm, "model", "mock-llm"),
-            prompt_version="1.1.0",
-            word_count=len(content),
-        )
-        db_session.add(draft)
-        section.status = "drafted"
-        section.current_version_id = draft.id
-        await db_session.flush()
+        model = getattr(self.llm, "model_routing", {}).get("generate_section_content", getattr(self.llm, "model", "mock-llm"))
+        draft = await write_version(db_session, section, content, citations,
+                                    expected_version_id, model=model)
 
         return {"section_id": section.id, "draft_id": draft.id, "word_count": len(content), "citations": citations}
 
@@ -795,13 +785,11 @@ class DraftingAgent(BaseAgent):
                 },
                 {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
             ]
-            try:
-                data = await self.call_llm("generate_section_content", messages, "json", max_tokens=3000, temperature=0.2)
-                content = str(data.get("content") or "").strip()
-                if len(content) > 50:
-                    return content
-            except Exception:
-                pass
+            data = await self.call_llm("generate_section_content", messages, "json", max_tokens=3000, temperature=0.2)
+            content = data.get("content")
+            if not isinstance(content, str) or len(content.strip()) <= 50:
+                raise LLMResponseError("模型未返回有效章节正文，未保存草稿，请检查模型后重试")
+            return content.strip()
         return self._rule_generate_section_content(title, facts, chunks)
 
     def _rule_generate_section_content(self, title: str, facts: dict, chunks: list) -> str:
@@ -897,8 +885,8 @@ class ReviewAgent(BaseAgent):
         }
 
 
-def build_llm_gateway():
-    runtime = get_runtime_llm_config()
+def build_llm_gateway(runtime=None):
+    runtime = runtime or get_runtime_llm_config()
     provider = (runtime.provider or "mock").lower()
     if provider in ("mock", "none", "disabled") or not runtime.api_key:
         return MockLLMGateway()
@@ -908,10 +896,10 @@ def build_llm_gateway():
     }
     default_models = {
         "openai": "gpt-4o-mini",
-        "deepseek": "deepseek-v4-flash",
+        "deepseek": "deepseek-flash",
     }
-    fast_model = runtime.fast_model or default_models.get(provider, "gpt-4o-mini")
-    quality_model = runtime.quality_model or ("deepseek-v4-pro" if provider == "deepseek" else "gpt-4o")
+    fast_model = runtime.fast_model or runtime.model or default_models.get(provider, "gpt-4o-mini")
+    quality_model = runtime.quality_model or runtime.model or ("deepseek-v4-pro" if provider == "deepseek" else "gpt-4o")
     model_routing = {
         "extract_project_facts": fast_model,
         "extract_requirements": fast_model,
@@ -933,6 +921,7 @@ def build_llm_gateway():
         cost_limit_per_project=runtime.cost_limit_per_project or 0.0,
         estimated_cost_per_1k_tokens=runtime.estimated_cost_per_1k_tokens or 0.0,
         model_routing=model_routing,
+        provider=provider,
     )
 
 

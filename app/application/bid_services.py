@@ -227,22 +227,7 @@ class DraftService:
 
     async def create_draft(self, section_id: str, content: str, citations: list,
                             model_name: str = "mock-llm", prompt_version: str = "1.0.0") -> DraftVersion:
-        draft = DraftVersion(
-            section_id=section_id,
-            content=content,
-            citations=citations,
-            generated_by="drafting_agent",
-            model_name=model_name,
-            prompt_version=prompt_version,
-            word_count=len(content) if content else 0,
-        )
-        self.db.add(draft)
-        await self.db.flush()
-
-        await self.db.execute(
-            update(OutlineSection).where(OutlineSection.id == section_id).values(
-                current_version_id=draft.id, status="drafted"
-            )
-        )
-        await self.db.flush()
-        return draft
+        from app.application.editing_service import write_version
+        section = await self.db.get(OutlineSection, section_id)
+        return await write_version(self.db, section, content, citations,
+                                   section.current_version_id, model=model_name)

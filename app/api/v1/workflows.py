@@ -48,7 +48,6 @@ async def stream_workflow_status(
     project_id: str,
     request: Request,
     token: str | None = None,
-    db: AsyncSession = Depends(get_db),
 ):
     if not _validate_stream_token(token):
         raise HTTPException(401, "未登录或令牌已过期")
@@ -58,8 +57,13 @@ async def stream_workflow_status(
         last_payload = None
         try:
             while not await request.is_disconnected():
-                svc = WorkflowService(db)
-                status = await svc.get_workflow_status(project_id)
+                from app.core.database import async_session
+                import anyio
+                # Streaming outlives FastAPI's dependency scope; do not reuse a
+                # request session or hold a connection while waiting for events.
+                with anyio.CancelScope(shield=True):
+                    async with async_session() as db:
+                        status = await WorkflowService(db).get_workflow_status(project_id)
                 payload = json.dumps(status, ensure_ascii=False, default=str)
                 if payload != last_payload:
                     yield {"event": "workflow.status.changed", "data": payload}

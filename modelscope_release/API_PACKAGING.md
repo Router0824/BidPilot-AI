@@ -13,7 +13,7 @@ Do not hard-code API keys in:
 - frontend code
 - screenshots or logs
 
-If a key was pasted into chat, rotate it in the provider console before publishing.
+If a credential is exposed, revoke it in the provider console and replace it before deployment.
 
 ## Supported API Shape
 
@@ -76,4 +76,3 @@ Then verify:
 http://localhost:7860/health/ready
 http://localhost:7860
 ```
-

@@ -28,6 +28,12 @@
             <td><span :class="['risk-tag', r.risk_level]">{{ riskLabel(r.risk_level) }}</span></td>
             <td class="source">P{{ r.source_page }}</td>
             <td>
+              <select :value="r.response_section_id || ''" @change="assignSection(r, $event.target.value)" aria-label="对应章节">
+                <option value="">选择响应章节</option>
+                <option v-for="section in sections" :key="section.id" :value="section.id">{{ section.title }}</option>
+              </select>
+              <button v-if="r.response_section_id && r.status !== 'responded'" class="btn-sm" @click="confirmResponse(r)">确认已响应</button>
+              <router-link v-if="r.response_section_id" :to="`/project/${projectId}/outline?section=${r.response_section_id}`">编辑章节</router-link>
               <span class="confidence-chip" :title="r.confidence_detail?.explanation">
                 <b :class="['confidence-dot', r.confidence_detail?.level]"></b>
                 {{ confidencePercent(r) }}%
@@ -51,18 +57,38 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { pushMessage } from '../feedback'
 import { useAppStore } from '../stores/app'
+import api from '../api'
 
 const route = useRoute()
 const store = useAppStore()
 const projectId = route.params.id
 const requirements = ref([])
+const sections = ref([])
 const filterRisk = ref('')
 const filterType = ref('')
 const filterStatus = ref('')
 const confirmingId = ref('')
 const recalculating = ref(false)
 
-onMounted(loadReqs)
+onMounted(async () => {
+  await loadReqs()
+  const tree = await store.fetchOutline(projectId)
+  sections.value = tree.flatMap(s => [s, ...(s.children || [])])
+})
+
+async function assignSection(requirement, sectionId) {
+  try {
+    await api.patch(`/projects/${projectId}/requirements/${requirement.id}`, { response_section_id: sectionId || null, status: 'confirmed' })
+    await loadReqs()
+  } catch { await loadReqs() }
+}
+async function confirmResponse(requirement) {
+  if (!window.confirm('已核对章节内容和引用材料，确认该要求已完整响应？')) return
+  try {
+    await api.patch(`/projects/${projectId}/requirements/${requirement.id}`, { status: 'responded' })
+    await loadReqs()
+  } catch { /* Request feedback displays failure. */ }
+}
 
 async function loadReqs() {
   const filters = {}

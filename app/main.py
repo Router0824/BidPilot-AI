@@ -7,6 +7,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import async_session, init_db
 from app.api.v1 import auth, projects, documents, bid, workflows, knowledge, enterprise, consultation, information, system
+from app.api.v1 import productivity
 
 
 @asynccontextmanager
@@ -48,6 +49,7 @@ app.include_router(enterprise.router, prefix="/api/v1")
 app.include_router(consultation.router, prefix="/api/v1")
 app.include_router(information.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
+app.include_router(productivity.router, prefix="/api/v1")
 
 
 @app.exception_handler(Exception)

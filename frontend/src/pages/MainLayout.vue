@@ -18,7 +18,7 @@
           <router-link :to="`/project/${currentProject.id}`" class="nav-item">项目详情</router-link>
           <router-link :to="`/project/${currentProject.id}/facts`" class="nav-item">事实确认</router-link>
           <router-link :to="`/project/${currentProject.id}/requirements`" class="nav-item">要求矩阵</router-link>
-          <router-link :to="`/project/${currentProject.id}/outline`" class="nav-item">技术标大纲</router-link>
+          <router-link :to="`/project/${currentProject.id}/outline`" class="nav-item">章节编写</router-link>
           <router-link :to="`/project/${currentProject.id}/reviews`" class="nav-item">审查中心</router-link>
           <router-link :to="`/project/${currentProject.id}/workflow`" class="nav-item">Agent 任务</router-link>
           <router-link :to="`/project/${currentProject.id}/knowledge`" class="nav-item">知识库</router-link>

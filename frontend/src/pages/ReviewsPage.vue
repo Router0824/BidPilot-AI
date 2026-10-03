@@ -36,9 +36,11 @@
           </div>
           <p class="finding-desc">{{ f.description }}</p>
           <p v-if="f.suggestion" class="finding-suggestion">建议：{{ f.suggestion }}</p>
+          <router-link v-if="f.section_id" :to="`/project/${projectId}/outline?section=${f.section_id}`">打开对应章节</router-link>
+          <p v-if="f.ignore_reason">处理说明：{{ f.ignore_reason }}</p>
           <div v-if="f.status === 'open'" class="finding-actions">
             <button class="btn-sm btn-fix" @click="fixFinding(f)" :disabled="fixingId === f.id">
-              {{ f.auto_fix_allowed ? (fixingId === f.id ? '修正中' : '自动修正') : '请求人工处理' }}
+              {{ f.auto_fix_allowed ? (fixingId === f.id ? '修正中' : '应用低风险建议') : '查看处理建议' }}
             </button>
             <button class="btn-sm btn-resolve" @click="resolveFinding(f.id)">确认处理</button>
             <button class="btn-sm btn-ignore" @click="ignoreFinding(f.id)">忽略</button>
@@ -82,6 +84,7 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import DemoGuide from '../components/DemoGuide.vue'
 import { scrollDemoFocus } from '../demoScroll'
+import api from '../api'
 
 const route = useRoute()
 const store = useAppStore()
@@ -95,6 +98,7 @@ const demoMode = computed(() => route.query.demo === '1')
 
 onMounted(async () => {
   reviews.value = await store.listReviews(projectId)
+  await loadFindings()
   fixAttempts.value = await store.listFixAttempts(projectId)
   if (demoMode.value && !reviews.value.length && !fixAttempts.value.length) {
     await prepareDemoReview()
@@ -121,7 +125,7 @@ async function runReview() {
   reviewing.value = true
   try {
     const result = await store.runReview(projectId, 'full')
-    findings.value = result.findings || []
+    await loadFindings()
     reviews.value = await store.listReviews(projectId)
     fixAttempts.value = await store.listFixAttempts(projectId)
     if (demoMode.value) scrollDemoFocus()
@@ -136,7 +140,7 @@ async function prepareDemoReview() {
     const fixable = findings.value.filter(f => f.auto_fix_allowed && f.status === 'open').slice(0, 2)
     for (const finding of fixable) {
       await store.fixFinding(projectId, finding.id, true)
-      findings.value = findings.value.map(item => item.id === finding.id ? { ...item, status: 'resolved' } : item)
+      await loadFindings()
     }
     reviews.value = await store.listReviews(projectId)
     fixAttempts.value = await store.listFixAttempts(projectId)
@@ -153,18 +157,25 @@ async function fixFinding(f) {
   try {
     await store.fixFinding(projectId, f.id, true)
     fixAttempts.value = await store.listFixAttempts(projectId)
-    findings.value = findings.value.map(item => item.id === f.id && f.auto_fix_allowed ? {...item, status: 'resolved'} : item)
+    await loadFindings()
   } finally { fixingId.value = '' }
 }
 
 async function resolveFinding(id) {
-  await store.updateFinding(projectId, id, 'resolved')
-  findings.value = findings.value.map(f => f.id === id ? {...f, status: 'resolved'} : f)
+  const reason = window.prompt('请填写处理结果、修改位置或确认依据：')
+  if (!reason?.trim()) return
+  await store.updateFinding(projectId, id, 'resolved', reason.trim())
+  await loadFindings()
 }
 
 async function ignoreFinding(id) {
-  await store.updateFinding(projectId, id, 'ignored', '经评估无需处理')
-  findings.value = findings.value.map(f => f.id === id ? {...f, status: 'ignored'} : f)
+  const reason = window.prompt('请填写忽略此问题的具体理由：')
+  if (!reason?.trim()) return
+  await store.updateFinding(projectId, id, 'ignored', reason.trim())
+  await loadFindings()
+}
+async function loadFindings() {
+  findings.value = (await api.get(`/projects/${projectId}/review-tasks`)).data.data
 }
 </script>
 

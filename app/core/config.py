@@ -11,7 +11,7 @@ def resolve_path(path: str) -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "BidPilot"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "1.1.0"
     DEBUG: bool = True
 
     # Database

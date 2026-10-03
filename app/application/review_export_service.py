@@ -35,8 +35,11 @@ class ReviewService:
         if review_type in ("full", "overcommit"):
             findings += await self._check_overcommit(project_id, review_run.id)
 
+        await self.db.flush()
         review_run.findings = [f.id for f in findings]
         review_run.status = "completed"
+        from app.domain.models import utcnow
+        review_run.completed_at = utcnow()
         await self.db.flush()
         return review_run
 
@@ -80,7 +83,7 @@ class ReviewService:
                 )).scalar_one_or_none()
                 if draft and draft.content:
                     for key, val in facts.items():
-                        if val and val not in draft.content:
+                        if key in draft.content and val and val not in draft.content:
                             f = ReviewFinding(
                                 review_run_id=review_run_id,
                                 finding_type="numeric_inconsistency" if re.search(r"\d", str(val)) else "internal_conflict",
@@ -104,6 +107,12 @@ class ReviewService:
             draft = (await self.db.execute(
                 select(DraftVersion).where(DraftVersion.id == section.current_version_id)
             )).scalar_one_or_none()
+            if draft and not draft.citations:
+                finding = ReviewFinding(review_run_id=review_run_id, finding_type="citation_missing",
+                    risk_level="medium", description=f"章节「{section.title}」尚未关联引用材料",
+                    location=f"section:{section.id}", suggestion="在章节编辑器中选择有效的企业材料，再保存并复查")
+                self.db.add(finding)
+                findings.append(finding)
             if draft and draft.citations:
                 for cite in draft.citations:
                     if cite.get("status") == "unverified":
@@ -197,15 +206,22 @@ class FixerService:
         user: dict,
         apply: bool = True,
     ) -> FixAttempt:
-        issue = (await self.db.execute(select(ReviewFinding).where(ReviewFinding.id == issue_id))).scalar_one_or_none()
+        issue = (await self.db.execute(select(ReviewFinding).join(ReviewRun).where(
+            ReviewFinding.id == issue_id, ReviewRun.project_id == project_id))).scalar_one_or_none()
         if not issue:
             raise ValueError("审查问题不存在")
 
         section = await self._section_for_issue(project_id, issue)
+        from app.application.editing_service import editable_section
+        if section:
+            await editable_section(self.db, project_id, section.id, user)
         draft = await self._draft_for_section(section)
         issue_type = issue.finding_type or "internal_conflict"
         risk_level = issue.risk_level or "medium"
         auto_fix_allowed = self._auto_fix_allowed(issue_type, risk_level)
+        from app.domain.models import SectionProtection
+        protection = await self.db.get(SectionProtection, section.id) if section else None
+        auto_fix_allowed = auto_fix_allowed and not (protection and protection.protected) and issue.status == "open"
         requires_confirmation = not auto_fix_allowed
         before = draft.content if draft and draft.content else ""
 
@@ -258,10 +274,12 @@ class FixerService:
         )
         if apply and draft and after != before:
             import datetime
-            draft.content = after
-            draft.word_count = len(after)
+            from app.application.editing_service import write_version
+            new_draft = await write_version(self.db, section, after, draft.citations,
+                draft.id, actor="fixer_agent", model="safe-fixer")
+            attempt.draft_version_id = new_draft.id
             attempt.applied_at = datetime.datetime.now(datetime.timezone.utc)
-            issue.status = "resolved"
+            # A placeholder is not evidence; leave the finding open for a reviewer.
             await self.db.flush()
         return attempt
 
@@ -314,7 +332,7 @@ class FixerService:
     def _auto_fix_allowed(self, issue_type: str, risk_level: str) -> bool:
         if risk_level == "high" or issue_type in HIGH_RISK_ISSUE_TYPES:
             return False
-        return issue_type in AUTO_FIXABLE_TYPES
+        return risk_level == "low" and issue_type in AUTO_FIXABLE_TYPES
 
     def _apply_safe_fix(self, issue: ReviewFinding, section: OutlineSection | None, before: str) -> str:
         note = (
@@ -511,6 +529,31 @@ class ExportService:
     def _add_markdownish_paragraphs(self, doc, content: str) -> None:
         from docx.enum.text import WD_COLOR_INDEX
 
+        # Markdown's table parser handles alignment rows and escaped delimiters.
+        from markdown import markdown
+        from xml.etree import ElementTree
+        try:
+            root = ElementTree.fromstring("<root>" + markdown(content or "", extensions=["tables"]) + "</root>")
+            if root.findall("table"):
+                for element in root:
+                    if element.tag == "table":
+                        rows = element.findall(".//tr")
+                        width = max((len(row) for row in rows), default=0)
+                        if width:
+                            table = doc.add_table(rows=0, cols=width)
+                            table.style = "Table Grid"
+                            for row in rows:
+                                cells = table.add_row().cells
+                                for index, cell in enumerate(row):
+                                    cells[index].text = "".join(cell.itertext())
+                    elif element.tag in ("h1", "h2", "h3"):
+                        doc.add_heading("".join(element.itertext()), level=int(element.tag[1]))
+                    else:
+                        doc.add_paragraph("".join(element.itertext()))
+                return
+        except ElementTree.ParseError:
+            pass
+
         for line in (content or "").splitlines():
             stripped = line.strip()
             if not stripped:
@@ -555,9 +598,39 @@ class ExportService:
             doc.add_paragraph(f"{'  ' * max(0, section.level - 1)}{section.sort_order}. {section.title}")
         doc.save(filepath)
 
-    async def _write_full_docx(self, filepath: str, sections: list[OutlineSection]) -> None:
-        doc = self._new_docx()
-        doc.add_heading("技术标书", level=1)
+    async def _write_full_docx(self, filepath: str, sections: list[OutlineSection],
+                               title="技术标书", company="", template=None, draft_mode=False) -> None:
+        from docx import Document as WordDocument
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Pt
+        doc = WordDocument(template) if template else self._new_docx()
+        from app.application.word_template import fill_template
+        info, anchor = fill_template(doc, title, company) if template else ({"fields": []}, None)
+        original_nodes = set(doc.element.body)
+        if "{{project_name}}" not in info["fields"]:
+            doc.add_paragraph(title, style="Title")
+        if company and "{{company_name}}" not in info["fields"]:
+            doc.add_paragraph(company)
+        if draft_mode:
+            doc.add_paragraph("工作草稿 · 未完成事项尚待处理，不作为最终提交版本")
+        doc.add_paragraph("目录", style="TOC Heading")
+        toc = OxmlElement("w:fldSimple")
+        toc.set(qn("w:instr"), 'TOC \\o "1-3" \\h \\z \\u')
+        doc.add_paragraph()._p.append(toc)
+        update_fields = OxmlElement("w:updateFields")
+        update_fields.set(qn("w:val"), "true")
+        doc.settings.element.append(update_fields)
+        if "PAGE" not in doc.sections[-1].footer._element.xml:
+            footer = doc.sections[-1].footer.add_paragraph()
+            footer.add_run("第 ")
+            page = OxmlElement("w:fldSimple")
+            page.set(qn("w:instr"), "PAGE")
+            footer._p.append(page)
+            footer.add_run(" 页")
+        if not template:
+            doc.styles["Normal"].font.size = Pt(11)
+        doc.add_page_break()
         for section in sections:
             doc.add_heading(section.title, level=min(max(section.level, 1), 3))
             if section.current_version_id:
@@ -573,6 +646,11 @@ class ExportService:
                             f"{cite.get('source', '')} 第{cite.get('page', '-')}页：{cite.get('snippet', '')}",
                             style="List Bullet",
                         )
+        if anchor is not None:
+            for node in list(doc.element.body):
+                if node not in original_nodes:
+                    anchor.addprevious(node)
+            anchor.getparent().remove(anchor)
         doc.save(filepath)
 
     def _write_risk_list_docx(self, filepath: str, reqs: list[Requirement]) -> None:

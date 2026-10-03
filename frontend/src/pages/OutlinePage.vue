@@ -1,13 +1,17 @@
 <template>
   <div class="outline-page">
     <div class="header">
-      <h2>技术标大纲</h2>
-      <button class="btn-primary" @click="exportOutline">导出大纲</button>
+      <h2>章节编写</h2>
+      <router-link :to="`/project/${projectId}`">交付检查与 Word 导出</router-link>
     </div>
 
     <div class="layout">
       <div class="outline-panel">
         <h3>章节目录</h3>
+        <form class="new-section" @submit.prevent="addSection">
+          <input v-model="newTitle" placeholder="新章节名称" aria-label="新章节名称" maxlength="255" required />
+          <button class="btn-secondary" :disabled="addingSection">添加章节</button>
+        </form>
         <div v-if="loading" class="loading">加载中...</div>
         <div v-else class="outline-tree">
           <div v-for="s in outline" :key="s.id" class="outline-node" :style="{ paddingLeft: (s.level - 1) * 24 + 'px' }">
@@ -29,10 +33,30 @@
         <template v-if="selectedSection">
           <div class="editor-header">
             <h3>{{ selectedSection.title }}</h3>
-            <button class="btn-primary" @click="generateDraft" :disabled="generating">
+            <button class="btn-primary" @click="generateDraft" :disabled="generating || saving || protectedContent || dirty || sectionLoading">
               {{ generating ? '生成中...' : '生成章节初稿' }}
             </button>
           </div>
+          <div class="editing-toolbar">
+            <label><input type="checkbox" :checked="protectedContent" @change="toggleProtection" :disabled="saving || generating || sectionLoading" />保护人工内容</label>
+            <button class="btn-secondary" @click="editing = !editing" :disabled="sectionLoading">{{ editing ? '预览正文' : '编辑正文' }}</button>
+            <button class="btn-primary" @click="saveDraft" :disabled="saving || generating || sectionLoading || !dirty">{{ saving ? '保存中...' : '保存草稿' }}</button>
+            <span role="status">{{ dirty ? '有未保存的修改' : saveMessage || '已同步' }}</span>
+          </div>
+          <p v-if="editorError" role="alert" class="editor-error">{{ editorError }}</p>
+          <textarea v-if="editing" v-model="draftContent" class="content-editor" aria-label="章节正文" :disabled="sectionLoading || saving || generating" />
+          <details v-if="editing" class="material-picker" @toggle="loadMaterials">
+            <summary>引用企业材料 · 已选 {{ knowledgeIds.length }} 项</summary>
+            <div v-for="id in knowledgeIds.filter(id => !materials.some(m => m.id === id))" :key="id">
+              {{ citations.find(c => c.chunk_id === id)?.source || '未载入的引用' }}
+              <button class="btn-secondary" @click="knowledgeIds = knowledgeIds.filter(value => value !== id)" :disabled="saving || generating">移除引用</button>
+            </div>
+            <label v-for="material in materials" :key="material.id">
+              <input type="checkbox" :value="material.id" v-model="knowledgeIds" :disabled="!material.is_audited || material.is_expired || saving || generating || sectionLoading" />
+              <span>{{ material.material_name }} · 第 {{ material.source_page || '?' }} 页 <small>{{ material.is_expired ? '已过期' : material.is_audited ? '已审核' : '待审核' }}</small></span>
+            </label>
+            <router-link :to="`/project/${projectId}/knowledge`">管理企业材料</router-link>
+          </details>
           <div v-if="visibleAgentProgress.length" class="agent-progress">
             <div v-for="event in visibleAgentProgress.slice(0, 3)" :key="event.id" class="agent-progress-item">
               <span></span>
@@ -41,7 +65,7 @@
             </div>
           </div>
 
-          <div v-if="draftContent" class="draft-content">
+          <div v-if="draftContent && !editing" class="draft-content">
             <div v-if="versions.length > 1" class="version-toolbar">
               <label>版本对比</label>
               <select v-model="leftVersionId">
@@ -77,7 +101,7 @@
             </template>
           </div>
 
-          <div v-else-if="!generating" class="empty-editor">
+          <div v-else-if="!generating && !editing" class="empty-editor">
             <p>选择左侧章节后点击"生成章节初稿"</p>
           </div>
         </template>
@@ -88,9 +112,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { useAppStore } from '../stores/app'
+import api from '../api'
 
 const route = useRoute()
 const store = useAppStore()
@@ -101,6 +126,12 @@ const selectedSection = ref(null)
 const draftContent = ref('')
 const citations = ref([])
 const generating = ref(false)
+const newTitle = ref(''), addingSection = ref(false)
+const saving = ref(false), editing = ref(true), protectedContent = ref(false), sectionLoading = ref(false)
+const savedContent = ref(''), currentVersionId = ref(null), saveMessage = ref(''), editorError = ref('')
+const materials = ref([]), knowledgeIds = ref([]), savedKnowledgeIds = ref('[]')
+const dirty = computed(() => draftContent.value !== savedContent.value || JSON.stringify(knowledgeIds.value) !== savedKnowledgeIds.value)
+let selectionRequest = 0
 const versions = ref([])
 const compareMode = ref(false)
 const leftVersionId = ref('')
@@ -113,6 +144,10 @@ let source = null
 onMounted(async () => {
   outline.value = await store.fetchOutline(projectId)
   loading.value = false
+  const all = outline.value.flatMap(s => [s, ...(s.children || [])])
+  const initial = all.find(s => s.id === route.query.section) || all[0]
+  if (initial) await selectSection(initial)
+  window.addEventListener('beforeunload', beforeUnload)
   source = new EventSource(store.workflowStreamUrl(projectId))
   source.addEventListener('agent.progress', (event) => {
     const payload = JSON.parse(event.data)
@@ -132,6 +167,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('beforeunload', beforeUnload)
   source?.close()
   clearTimers.forEach(timer => clearTimeout(timer))
   clearTimers.clear()
@@ -140,6 +176,7 @@ onUnmounted(() => {
 const renderedContent = computed(() => {
   if (!draftContent.value) return ''
   return draftContent.value
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br/>')
     .replace(/^/, '<p>')
@@ -162,21 +199,84 @@ const visibleAgentProgress = computed(() => {
 })
 
 async function selectSection(s) {
+  if (generating.value || saving.value) return
+  if (dirty.value && !window.confirm('当前修改尚未保存，确定放弃修改？')) return
+  const request = ++selectionRequest
+  sectionLoading.value = true
   selectedSection.value = s
   draftContent.value = ''
+  savedContent.value = ''
+  knowledgeIds.value = []; savedKnowledgeIds.value = '[]'
+  currentVersionId.value = null
+  protectedContent.value = false
+  editorError.value = ''; saveMessage.value = ''
   citations.value = []
   versions.value = []
   compareMode.value = false
-  if (s.status === 'drafted') {
-    versions.value = await store.fetchDraftVersions(projectId, s.id)
-    if (versions.value.length) {
-      draftContent.value = versions.value[0].content
-      citations.value = versions.value[0].citations || []
-      rightVersionId.value = versions.value[0].id
-      leftVersionId.value = versions.value[1]?.id || versions.value[0].id
-    }
-  }
+  try {
+    const [response, history] = await Promise.all([
+      api.get(`/projects/${projectId}/outline/sections/${s.id}/editor`),
+      store.fetchDraftVersions(projectId, s.id),
+    ])
+    if (request !== selectionRequest) return
+    const data = response.data.data
+    draftContent.value = data.content || ''; savedContent.value = draftContent.value
+    currentVersionId.value = data.version_id; protectedContent.value = data.protected
+    citations.value = data.citations || []; versions.value = history
+    knowledgeIds.value = [...new Set(citations.value.map(c => c.chunk_id).filter(Boolean))]
+    savedKnowledgeIds.value = JSON.stringify(knowledgeIds.value)
+    rightVersionId.value = data.version_id
+    leftVersionId.value = history.find(v => v.id !== data.version_id)?.id || data.version_id
+  } catch (e) { editorError.value = e.response?.data?.detail || '章节加载失败，请重新选择章节' }
+  finally { if (request === selectionRequest) sectionLoading.value = false }
 }
+
+async function saveDraft() {
+  saving.value = true; editorError.value = ''
+  try {
+    const { data } = await api.put(`/projects/${projectId}/outline/sections/${selectedSection.value.id}/editor`,
+      { content: draftContent.value, expected_version_id: currentVersionId.value, knowledge_ids: knowledgeIds.value })
+    currentVersionId.value = data.data.version_id; protectedContent.value = true
+    savedContent.value = draftContent.value; saveMessage.value = '已保存并保护'
+    savedKnowledgeIds.value = JSON.stringify(knowledgeIds.value)
+    selectedSection.value.status = 'drafted'
+    versions.value = await store.fetchDraftVersions(projectId, selectedSection.value.id)
+    citations.value = versions.value.find(v => v.id === currentVersionId.value)?.citations || []
+    rightVersionId.value = currentVersionId.value; leftVersionId.value = versions.value[1]?.id || currentVersionId.value
+  } catch (e) { editorError.value = e.response?.data?.detail || '保存失败，正文仍保留在编辑器中' }
+  finally { saving.value = false }
+}
+async function addSection() {
+  if (!newTitle.value.trim()) return
+  addingSection.value = true
+  try {
+    await api.post(`/projects/${projectId}/outline/sections`, { title: newTitle.value.trim(), level: 1 })
+    outline.value = await store.fetchOutline(projectId)
+    newTitle.value = ''
+  } catch { /* Request feedback displays failure. */ }
+  finally { addingSection.value = false }
+}
+async function loadMaterials(event) {
+  if (!event.target.open) return
+  try { materials.value = await store.fetchKnowledge() }
+  catch { editorError.value = '材料加载失败，请重新打开引用列表' }
+}
+async function toggleProtection(event) {
+  const next = event.target.checked
+  if (!next && !window.confirm('解除保护后，生成和自动修正可以更新本章。确定解除？')) { event.target.checked = true; return }
+  saving.value = true
+  try {
+    await api.put(`/projects/${projectId}/outline/sections/${selectedSection.value.id}/protection`, { protected: next })
+    protectedContent.value = next
+  } catch { event.target.checked = protectedContent.value }
+  finally { saving.value = false }
+}
+function beforeUnload(event) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
+onBeforeRouteLeave(() => !dirty.value || window.confirm('当前修改尚未保存，确定离开？'))
+watch(() => route.query.section, id => {
+  const section = outline.value.flatMap(s => [s, ...(s.children || [])]).find(s => s.id === id)
+  if (section) selectSection(section)
+})
 
 async function generateDraft() {
   if (!selectedSection.value) return
@@ -188,16 +288,23 @@ async function generateDraft() {
   generating.value = true
   try {
     const result = await store.generateDraft(projectId, sectionId)
+    if (result.skipped) { editorError.value = result.reason; return }
     draftContent.value = ''
     citations.value = []
     versions.value = await store.fetchDraftVersions(projectId, sectionId)
     if (versions.value.length) {
       draftContent.value = versions.value[0].content
+      savedContent.value = draftContent.value
+      currentVersionId.value = versions.value[0].id
       citations.value = versions.value[0].citations || []
+      knowledgeIds.value = [...new Set(citations.value.map(c => c.chunk_id).filter(Boolean))]
+      savedKnowledgeIds.value = JSON.stringify(knowledgeIds.value)
       rightVersionId.value = versions.value[0].id
       leftVersionId.value = versions.value[1]?.id || versions.value[0].id
     }
     sectionRef.status = 'drafted'
+  } catch (e) {
+    editorError.value = e.response?.data?.detail || '生成失败'
   } finally {
     generating.value = false
     scheduleProgressClear(sectionId)
@@ -217,6 +324,11 @@ function versionLabel(v) {
 function buildLineDiff(leftText, rightText) {
   const left = leftText.split('\n')
   const right = rightText.split('\n')
+  if (left.length * right.length > 1000000) {
+    return Array.from({ length: Math.max(left.length, right.length) }, (_, i) => ({
+      type: left[i] === right[i] ? 'same' : 'changed', left: left[i] || '', right: right[i] || '',
+    }))
+  }
   const dp = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0))
   for (let i = left.length - 1; i >= 0; i--) {
     for (let j = right.length - 1; j >= 0; j--) {
@@ -256,6 +368,21 @@ function scheduleProgressClear(sectionId) {
 
 <style scoped>
 .outline-page { max-width: 1400px; }
+.new-section { display: flex; gap: 6px; margin-bottom: 12px; }
+.new-section input { width: 0; flex: 1; min-width: 0; padding: 8px; border: 1px solid #ccd3dc; border-radius: 6px; }
+.new-section button { flex-shrink: 0; }
+.editing-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+.editing-toolbar label { display: flex; align-items: center; gap: 6px; }
+.content-editor { width: 100%; box-sizing: border-box; min-height: 55vh; resize: vertical; padding: 18px; border: 1px solid #ccd3dc; border-radius: 6px; font: inherit; font-size: 15px; line-height: 1.9; color: #252b33; background: #fff; }
+.editor-error { color: #b42318; font-size: 13px; }
+.material-picker { padding: 14px 0; font-size: 13px; }
+.material-picker summary { cursor: pointer; margin-bottom: 10px; }
+.material-picker label { display: flex; gap: 8px; align-items: baseline; padding: 8px 0; }
+.material-picker small { color: #637080; }
+.editor-panel { min-width: 0; }
+.version-toolbar { flex-wrap: wrap; }
+.draft-body { overflow-wrap: anywhere; }
+@media (max-width: 800px) { .layout { grid-template-columns: minmax(0, 1fr) !important; } .outline-tree { max-height: 220px !important; } .editor-header { flex-wrap: wrap; gap: 12px; } .diff-grid { grid-template-columns: minmax(0, 1fr) !important; } }
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 h2 { margin: 0; color: #1a1a2e; }
 .btn-primary { padding: 10px 20px; background: #0f3460; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
@@ -295,6 +422,7 @@ h2 { margin: 0; color: #1a1a2e; }
 .diff-line.added { background: #eaf7ee; color: #17633a; }
 .diff-line.removed { background: #fdecec; color: #8a1f1f; }
 .diff-line.same { color: #444; }
+.diff-line.changed { background: #fff5db; color: #624500; }
 .draft-body { line-height: 1.8; font-size: 14px; color: #333; }
 .draft-body :deep(.highlight) { background: #fff3cd; padding: 1px 2px; border-radius: 2px; }
 .draft-body :deep(h3) { font-size: 18px; margin: 16px 0 8px; color: #1a1a2e; }

@@ -35,12 +35,27 @@
           <span>{{ k.has_embedding ? '已索引' : '未索引' }}</span>
           <span :class="['audit-tag', k.is_audited ? 'audited' : 'unaudited']">{{ k.is_audited ? '已审核' : '未审核' }}</span>
           <span v-if="k.is_expired" class="expired-tag">已过期</span>
+          <span>有效期：{{ k.valid_until ? new Date(k.valid_until).toLocaleDateString() : '未设置' }}</span>
         </div>
+        <p>适用范围：{{ k.applicable_scope || '未设置' }}</p>
+        <p>来源：{{ k.source_reference || '待补充' }}</p>
         <div class="card-actions">
+          <button class="btn-sm" @click="editMetadata(k)">管理有效期与来源</button>
           <button v-if="!k.is_audited" class="btn-sm" @click="audit(k.id)">审核通过</button>
         </div>
       </div>
       <div v-if="knowledge.length === 0" class="empty">暂无知识条目，请添加企业材料</div>
+    </div>
+
+    <div v-if="editingMaterial" class="modal-overlay" @click.self="editingMaterial = null">
+      <form class="modal" @submit.prevent="saveMetadata">
+        <h3>{{ editingMaterial.material_name }}</h3>
+        <div class="form-group"><label>有效期至</label><input v-model="metadata.valid_until" type="date" /></div>
+        <div class="form-group"><label>适用范围</label><textarea v-model="metadata.applicable_scope" maxlength="2000" rows="3" /></div>
+        <div class="form-group"><label>来源文件或存档编号</label><input v-model="metadata.source_reference" maxlength="2000" /></div>
+        <p>修改后需重新审核；过期材料不会进入生成检索。</p>
+        <div class="modal-actions"><button type="button" @click="editingMaterial = null" :disabled="savingMetadata">取消</button><button class="btn-primary" :disabled="savingMetadata">保存</button></div>
+      </form>
     </div>
 
     <div v-if="showAdd" class="modal-overlay" @click.self="showAdd = false">
@@ -86,8 +101,25 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
+import api from '../api'
 
 const store = useAppStore()
+const editingMaterial = ref(null), metadata = ref({}), savingMetadata = ref(false)
+function editMetadata(material) {
+  editingMaterial.value = material
+  metadata.value = { valid_until: material.valid_until?.slice(0, 10) || '', applicable_scope: material.applicable_scope || '', source_reference: material.source_reference || '' }
+}
+async function saveMetadata() {
+  savingMetadata.value = true
+  try {
+    await api.patch(`/knowledge/${editingMaterial.value.id}/metadata`, {
+      ...metadata.value, valid_until: metadata.value.valid_until ? new Date(`${metadata.value.valid_until}T23:59:59`).toISOString() : null,
+    })
+    editingMaterial.value = null
+    await loadKnowledge()
+  } catch { /* Request feedback displays failure. */ }
+  finally { savingMetadata.value = false }
+}
 const knowledge = ref([])
 const loading = ref(true)
 const filterType = ref('')
@@ -156,7 +188,10 @@ h2 { margin: 0; color: #1a1a2e; }
 .card-header h4 { margin: 0; font-size: 15px; color: #1a1a2e; }
 .type-tag { font-size: 11px; padding: 2px 8px; background: #e8f4fd; color: #0f3460; border-radius: 10px; }
 .card-content { font-size: 13px; color: #555; line-height: 1.6; margin: 0 0 10px; }
-.card-meta { display: flex; gap: 12px; font-size: 12px; color: #999; }
+.card-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: #626b76; }
+.knowledge-card p { overflow-wrap: anywhere; font-size: 13px; }
+.modal { max-width: calc(100vw - 48px); box-sizing: border-box; }
+@media (max-width: 600px) { .knowledge-grid { grid-template-columns: minmax(0, 1fr); } .filters { flex-wrap: wrap; } .header { flex-wrap: wrap; gap: 12px; } }
 .card-actions { margin-top: 12px; }
 .btn-sm { padding: 5px 10px; font-size: 12px; background: #0f3460; color: white; border: none; border-radius: 4px; cursor: pointer; }
 .audit-tag { font-size: 11px; padding: 1px 6px; border-radius: 8px; }

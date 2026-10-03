@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
@@ -57,9 +58,28 @@ async def update_requirement(
     db: AsyncSession = Depends(get_db), user: dict = Depends(require_auth),
 ):
     svc = RequirementService(db)
+    existing = await svc.get_requirement(requirement_id)
+    if not existing or existing.project_id != project_id:
+        raise HTTPException(404, "要求不存在")
+    if data.response_section_id:
+        from app.domain.models import OutlineSection
+        section = await db.get(OutlineSection, data.response_section_id)
+        if not section or section.project_id != project_id:
+            raise HTTPException(422, "响应章节不属于当前项目")
+    if data.status == "responded":
+        from app.domain.models import OutlineSection, DraftVersion
+        section = await db.get(OutlineSection, data.response_section_id or existing.response_section_id or "")
+        draft = await db.get(DraftVersion, section.current_version_id) if section and section.current_version_id else None
+        if not draft or not (draft.content or "").strip():
+            raise HTTPException(422, "请先关联并完成响应章节")
+        if existing.risk_level == "high" and user["role"] not in ("admin", "project_admin", "reviewer"):
+            raise HTTPException(403, "高风险响应需审核人员确认")
     req = await svc.update_requirement(requirement_id, data)
     if not req:
         raise HTTPException(404, "要求不存在")
+    await EnterpriseService(db).audit("requirement", project_id, "update_response", user, None,
+        {"requirement_id": req.id, **data.model_dump(exclude_unset=True)})
+    await EvidenceGraphService(db).rebuild_project_links(project_id)
     return APIResponse(data={"id": req.id, "status": "updated"})
 
 
@@ -227,13 +247,21 @@ async def generate_draft(
     from sqlalchemy import select
     from app.domain.models import OutlineSection
 
-    section = (await db.execute(select(OutlineSection).where(OutlineSection.id == section_id))).scalar_one_or_none()
+    from app.application.editing_service import editable_section
+    section = await editable_section(db, project_id, section_id, user)
     enterprise = EnterpriseService(db)
     if section and not await enterprise.can_edit_section(section, user):
         raise HTTPException(403, "仅章节负责人或项目管理员可生成")
     await publish_progress(project_id, "node.start", "开始生成章节初稿", section_id, "generate_draft")
-    with progress_context(project_id, "generate_draft"):
-        draft = await drafting_agent.generate_draft(project_id, section_id, db)
+    import httpx
+    from app.core.llm_errors import LLMResponseError, llm_error_message
+    try:
+        with progress_context(project_id, "generate_draft"):
+            draft = await drafting_agent.generate_draft(project_id, section_id, db)
+    except (httpx.HTTPError, LLMResponseError) as exc:
+        message = llm_error_message(exc)
+        await publish_progress(project_id, "node.error", "章节生成失败", message, "generate_draft")
+        raise HTTPException(502, message)
     await publish_progress(project_id, "node.done", "章节初稿生成完成", section_id, "generate_draft")
     await enterprise.audit("draft", project_id, "generate", user, None, {"section_id": section_id, "draft_id": draft.get("draft_id")})
     return APIResponse(data=draft)
@@ -367,7 +395,7 @@ async def list_addendum_conflicts(
 # ── Reviews ──
 @router.post("/reviews")
 async def run_review(
-    project_id: str, review_type: str = "full",
+    project_id: str, review_type: Literal["full", "coverage", "consistency", "citation", "overcommit"] = "full",
     db: AsyncSession = Depends(get_db), user: dict = Depends(require_auth),
 ):
     svc = ReviewService(db)
@@ -385,7 +413,7 @@ async def run_review(
             "finding_type": f.finding_type, "severity": f.risk_level, "risk_level": f.risk_level,
             "description": f.description, "location": f.location,
             "suggested_action": f.suggestion, "suggestion": f.suggestion, "status": f.status,
-            "auto_fix_allowed": f.risk_level != "high" and f.finding_type in ("citation_missing",),
+            "auto_fix_allowed": f.risk_level == "low" and f.finding_type in ("citation_missing",),
         } for f in findings],
     })
 
@@ -411,9 +439,23 @@ async def update_finding(
     db: AsyncSession = Depends(get_db), user: dict = Depends(require_auth),
 ):
     svc = ReviewService(db)
+    from app.domain.models import ReviewFinding, ReviewRun
+    finding = await db.scalar(select(ReviewFinding).join(ReviewRun).where(
+        ReviewFinding.id == finding_id, ReviewRun.project_id == project_id))
+    if not finding:
+        raise HTTPException(404, "审查发现不存在")
+    if status not in ("open", "resolved", "ignored"):
+        raise HTTPException(422, "无效的处理状态")
+    if status in ("resolved", "ignored") and not (ignore_reason or "").strip():
+        raise HTTPException(422, "请填写处理说明或忽略理由")
+    if finding.risk_level == "high" and user["role"] not in ("admin", "project_admin", "reviewer"):
+        raise HTTPException(403, "高风险问题必须由审核人员或项目管理员确认")
+    before = {"status": finding.status}
     finding = await svc.update_finding(finding_id, status, ignore_reason)
     if not finding:
         raise HTTPException(404, "审查发现不存在")
+    await EnterpriseService(db).audit("review_finding", project_id, status, user, before,
+        {"finding_id": finding.id, "reason": ignore_reason})
     return APIResponse(data={"id": finding.id, "status": finding.status})
 
 
