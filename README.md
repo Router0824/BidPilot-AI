@@ -47,14 +47,54 @@ BidPilot-AI 是一个面向投标团队的 AI Agent 工作台。从招标文件�
 
 ## 界面预览
 
-| 页面 | 说明 | 预览 |
-| :--- | :--- | :---: |
-| 登录入口 | Mock 演示账号默认填充，适合评委快速进入系统。 | ![登录入口](docs/images/preview-login.png) |
-| 项目工作台 | 项目状态、风险、文档和工作流概览。 | ![项目工作台](docs/images/preview-dashboard.png) |
-| 项目详情 | 文件上传、Demo 入口、Agent 主舞台入口。 | ![项目详情](docs/images/preview-project.png) |
-| 章节编写 | 人工草稿保存、内容保护和企业材料引用。 | ![章节编写](docs/images/preview-editor.png) |
-| 咨询中心 | 基于项目上下文和知识库的问答，并展示引用来源。 | ![咨询中心](docs/images/preview-consultation.png) |
-| 资讯中心 | 商机监控、关键词筛选和机会热度分析。 | ![资讯中心](docs/images/preview-information.png) |
+以下为 **v1.1.0 实际运行截图**，使用独立 Mock 环境中的虚构演示项目，不包含真实投标资料或 API Key。
+
+### 项目交付工作台
+
+从截标倒计时、章节进度到待办分类，在项目详情中直接定位未完成章节、占位内容和缺失引用。
+
+![项目交付工作台：截标倒计时、章节进度与分类待办](docs/images/preview-project.png)
+
+### 章节编写与材料引用
+
+在同一界面管理章节目录、编辑正文和选择企业材料。人工保存后开启内容保护，保留历史版本。
+
+![章节编写：正文编辑、人工内容保护与已审核材料引用](docs/images/preview-editor.png)
+
+<details>
+<summary><b>展开更多界面：项目总览、审查中心、Word 交付、模型设置与登录</b></summary>
+
+#### 项目总览
+
+按状态筛选项目，查看文件数、要求数、负责人和投标截止日期。
+
+![项目总览：多个演示项目与状态筛选](docs/images/preview-dashboard.png)
+
+#### 审查中心
+
+审查结果保留风险等级、问题描述和处理建议，可直接打开对应章节补充引用。
+
+![审查中心：引用不足问题与对应章节入口](docs/images/preview-reviews.png)
+
+#### Word 模板与交付检查
+
+上传企业模板后显示已识别字段和正文插入方式。图中仍有待办，因此工作草稿可下载，正式稿保持禁用。
+
+![Word 交付面板：模板字段识别、范本下载与正式稿检查](docs/images/preview-delivery.png)
+
+#### 模型设置
+
+管理员可配置模型服务和连接参数，先测试再保存。图中仅选择了 DeepSeek 预设，未填写 Key、未启用真实模型，运行状态仍为 Mock。
+
+![模型设置：DeepSeek 预设、空密钥输入与当前 Mock 状态](docs/images/preview-settings.png)
+
+#### 登录入口
+
+内置账号仅供本地 Mock 演示，禁止用于生产环境。
+
+![登录入口：本地 Mock 演示账号](docs/images/preview-login.png)
+
+</details>
 
 ---
 
